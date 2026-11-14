@@ -1035,6 +1035,85 @@ body {
             border-color: rgba(255, 100, 100, 0.4);
             color: #ff8a8a;
         }
+.download-bar {
+  position: fixed;
+  left: 50%;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%) translateY(140%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(20, 22, 38, 0.98);
+  border: 1px solid rgba(167, 139, 250, 0.45);
+  border-radius: 14px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.65);
+  z-index: 3000;
+  max-width: 92vw;
+  transition: transform 0.3s cubic-bezier(0.2, 0.9, 0.4, 1);
+  pointer-events: none;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+.download-bar.show {
+  transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+.download-icon { font-size: 22px; flex-shrink: 0; }
+.download-info { flex: 1; min-width: 0; }
+.download-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: #e8e5f5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 46vw;
+}
+.download-sub {
+  font-size: 10px;
+  color: #6a7086;
+  margin-top: 2px;
+}
+.download-save {
+  padding: 10px 14px;
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.5), rgba(139, 128, 200, 0.3));
+  border: 1px solid rgba(167, 139, 250, 0.55);
+  border-radius: 10px;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-family: inherit;
+  transition: 0.2s;
+  -webkit-tap-highlight-color: transparent;
+}
+.download-save:active {
+  transform: scale(0.96);
+  background: linear-gradient(135deg, rgba(167, 139, 250, 0.75), rgba(139, 128, 200, 0.55));
+}
+.download-close {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #8890a6;
+  font-size: 12px;
+  cursor: pointer;
+  flex-shrink: 0;
+  font-family: inherit;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+}
+.download-close:active {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
 
 /* ===== CARTES PWA ===== */
 .cards-container {
@@ -1481,6 +1560,15 @@ body {
 
     <input type="file" class="file-input" id="file-input" accept=".json,application/json" />
     <div class="toast" id="toast"></div>
+<div class="download-bar" id="download-bar">
+  <div class="download-icon">📥</div>
+  <div class="download-info">
+    <div class="download-name" id="download-name">fichier.html</div>
+    <div class="download-sub">Appuie pour enregistrer</div>
+  </div>
+  <button class="download-save" id="download-save-btn" type="button">ENREGISTRER</button>
+  <button class="download-close" id="download-close-btn" type="button" aria-label="Fermer">✕</button>
+</div>
 
     <script>
         // ================================================================
@@ -2292,6 +2380,201 @@ body {
 
             return false;
         }
+function handleLabcodeExport(data) {
+    if (!data || typeof data.code !== 'string' || !data.code.length) {
+        showToast('Export invalide', true);
+        return;
+    }
+    var filename = data.filename || ('labcode-' + Date.now() + '.html');
+    var mime = data.mime || 'text/html;charset=utf-8';
+    var blob = new Blob([data.code], { type: mime });
+
+    pendingDownload = { blob: blob, filename: filename, code: data.code };
+
+    /* Tentative silencieuse (marche sur Chrome desktop / Android) */
+    tryAutoDownloadSilent(blob, filename);
+
+    /* Et on affiche TOUJOURS la barre : le tap utilisateur garantit l'user activation
+       → téléchargement fiable sur iOS PWA, Firefox, Safari, etc. */
+    showDownloadBar(filename);
+
+    vibrate(10);
+    playOpenSound();
+}
+var pendingDownload = null;
+var downloadBarTimer = null;
+
+function showDownloadBar(filename) {
+    var bar = document.getElementById('download-bar');
+    var nameEl = document.getElementById('download-name');
+    if (!bar || !nameEl) return;
+    nameEl.textContent = filename || 'fichier.html';
+    bar.classList.add('show');
+    clearTimeout(downloadBarTimer);
+    downloadBarTimer = setTimeout(function() {
+        bar.classList.remove('show');
+    }, 45000);
+}
+
+function hideDownloadBar() {
+    var bar = document.getElementById('download-bar');
+    if (bar) bar.classList.remove('show');
+    clearTimeout(downloadBarTimer);
+}
+
+function tryAutoDownloadSilent(blob, filename) {
+    var isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+                (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (isIOS) return; /* iOS : jamais fiable en auto, on attend le tap utilisateur */
+    try {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function() {
+            if (a.parentNode) document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, 4000);
+    } catch (e) {
+        console.warn('tryAutoDownloadSilent échoué:', e);
+    }
+}
+
+async function executeDownload() {
+    if (!pendingDownload) {
+        showToast('Aucun fichier à enregistrer', true);
+        return;
+    }
+    var blob = pendingDownload.blob;
+    var filename = pendingDownload.filename;
+    var code = pendingDownload.code;
+
+    vibrate(15);
+    playClickSound();
+
+    /* 1) File System Access API — user activation disponible ici (click parent) */
+    if (window.showSaveFilePicker) {
+        try {
+            var handle = await window.showSaveFilePicker({
+                suggestedName: filename,
+                types: [{ description: 'HTML', accept: { 'text/html': ['.html', '.htm'] } }]
+            });
+            var writable = await handle.createWritable();
+            await writable.write(blob);
+            await writable.close();
+            showToast('Enregistré');
+            playSuccessSound();
+            hideDownloadBar();
+            pendingDownload = null;
+            return;
+        } catch (err) {
+            if (err && err.name === 'AbortError') return;
+            /* NotAllowedError / SecurityError → fallback */
+        }
+    }
+
+    /* 2) Web Share avec fichier (iOS PWA — user activation disponible) */
+    var file = null;
+    try { file = new File([blob], filename, { type: blob.type || 'text/html' }); } catch (e) { file = null; }
+    var canShareFile = false;
+    try { canShareFile = !!(file && navigator.canShare && navigator.canShare({ files: [file] })); } catch (e) { canShareFile = false; }
+    if (canShareFile) {
+        try {
+            await navigator.share({ files: [file], title: filename });
+            showToast('Exporté');
+            playSuccessSound();
+            hideDownloadBar();
+            pendingDownload = null;
+            return;
+        } catch (err) {
+            if (err && err.name === 'AbortError') return;
+            /* Fallback */
+        }
+    }
+
+    /* 3) <a download> classique — fiable avec user activation */
+    try {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function() {
+            if (a.parentNode) document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, 4000);
+        showToast('Téléchargement lancé');
+        playSuccessSound();
+        hideDownloadBar();
+        pendingDownload = null;
+        return;
+    } catch (e) {
+        console.warn('a.download échoué:', e);
+    }
+
+    /* 4) Dernier recours : copier dans le presse-papiers */
+    try {
+        await navigator.clipboard.writeText(code);
+        showToast('Téléchargement bloqué — code copié dans le presse-papiers', true);
+    } catch (e2) {
+        showToast('Impossible d\'enregistrer ou copier ce fichier', true);
+    }
+}
+
+(function setupDownloadBarListeners() {
+    var saveBtn = document.getElementById('download-save-btn');
+    var closeBtn = document.getElementById('download-close-btn');
+    if (saveBtn) saveBtn.addEventListener('click', executeDownload);
+    if (closeBtn) closeBtn.addEventListener('click', function() {
+        hideDownloadBar();
+        pendingDownload = null;
+    });
+})();
+function downloadFallback(blob, filename) {
+    try {
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.style.display = 'none';
+        a.rel = 'noopener';
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function() {
+            if (a.parentNode) document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }, 4000);
+        showToast('Exporté');
+        vibrate(15);
+        playSuccessSound();
+        return true;
+    } catch (e) {
+        console.warn('downloadFallback échoué:', e);
+    }
+
+    /* 4) Dernier recours : nouvel onglet (permet d'enregistrer via Fichiers sur iOS) */
+    try {
+        var tabUrl = URL.createObjectURL(blob);
+        var w = window.open(tabUrl, '_blank');
+        if (w) {
+            showToast('Nouvel onglet ouvert');
+            setTimeout(function() { try { URL.revokeObjectURL(tabUrl); } catch (e) {} }, 10000);
+        } else {
+            showToast('Téléchargement bloqué par le navigateur', true);
+        }
+    } catch (e2) {
+        console.warn('window.open échoué:', e2);
+        showToast('Export impossible sur ce navigateur', true);
+    }
+    return false;
+}
 
         // ================================================================
         //  EXPORT / IMPORT
@@ -2469,68 +2752,68 @@ body {
             });
         }
 
-        function createCard(pwa) {
-            var container = document.getElementById('cards-container');
-            var card = document.createElement('div');
-            card.className = 'pwa-single hidden-card';
-            card.id = 'card-' + pwa.id;
-            card.style.borderColor = pwa.colorDim;
+function createCard(pwa) {
+    var container = document.getElementById('cards-container');
+    var card = document.createElement('div');
+    card.className = 'pwa-single hidden-card';
+    card.id = 'card-' + pwa.id;
+    card.style.borderColor = pwa.colorDim;
 
-            var header = document.createElement('div');
-            header.className = 'pwa-card-header';
-            header.innerHTML = '<span class="pwa-card-title" style="color:' + pwa.color + ';">' +
-                '<span class="dot" style="background:' + pwa.color + '; box-shadow:0 0 10px ' + pwa.color + ';"></span>' +
-                pwa.name +
-                '<span class="pwa-card-url">' + pwa.url + '</span>' +
-                '</span>' +
-                '<button class="pwa-card-reload" title="Recharger">⟳</button>';
-            header.querySelector('.pwa-card-reload').addEventListener('click', function(e) {
-                e.stopPropagation();
-                vibrate(10);
-                playClickSound();
-                var iframe = card.querySelector('iframe');
-                if (iframe) {
-                    var loader = card.querySelector('.pwa-loader');
-                    if (loader) loader.classList.remove('hidden');
-                    iframe.src = iframe.src;
-                }
-            });
-
-            var body = document.createElement('div');
-            body.className = 'pwa-card-body';
-
-            var loader = document.createElement('div');
-            loader.className = 'pwa-loader';
-            loader.style.color = pwa.color;
-            loader.innerHTML = '<div class="spinner" style="border-color:' + pwa.colorBg + '; border-top-color:' + pwa.color + ';"></div><div>Chargement…</div>';
-            body.appendChild(loader);
-
-            var iframe = document.createElement('iframe');
-            iframe.id = 'iframe-' + pwa.id;
-            iframe.src = pwa.url;
-            iframe.setAttribute('scrolling', 'auto');
-            iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-modals allow-popups');
-            iframe.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
-
-            var loaded = false;
-            iframe.addEventListener('load', function() {
-                loaded = true;
-                loader.classList.add('hidden');
-            });
-
-            setTimeout(function() {
-                if (!loaded) showError(body, pwa);
-            }, 12000);
-
-            iframe.addEventListener('error', function() {
-                showError(body, pwa);
-            });
-
-            body.appendChild(iframe);
-            card.appendChild(header);
-            card.appendChild(body);
-            container.appendChild(card);
+    var header = document.createElement('div');
+    header.className = 'pwa-card-header';
+    header.innerHTML = '<span class="pwa-card-title" style="color:' + pwa.color + ';">' +
+        '<span class="dot" style="background:' + pwa.color + '; box-shadow:0 0 10px ' + pwa.color + ';"></span>' +
+        pwa.name +
+        '<span class="pwa-card-url">' + pwa.url + '</span>' +
+        '</span>' +
+        '<button class="pwa-card-reload" title="Recharger">⟳</button>';
+    header.querySelector('.pwa-card-reload').addEventListener('click', function(e) {
+        e.stopPropagation();
+        vibrate(10);
+        playClickSound();
+        var iframe = card.querySelector('iframe');
+        if (iframe) {
+            var loader = card.querySelector('.pwa-loader');
+            if (loader) loader.classList.remove('hidden');
+            iframe.src = iframe.src;
         }
+    });
+
+    var body = document.createElement('div');
+    body.className = 'pwa-card-body';
+
+    var loader = document.createElement('div');
+    loader.className = 'pwa-loader';
+    loader.style.color = pwa.color;
+    loader.innerHTML = '<div class="spinner" style="border-color:' + pwa.colorBg + '; border-top-color:' + pwa.color + ';"></div><div>Chargement…</div>';
+    body.appendChild(loader);
+
+    var iframe = document.createElement('iframe');
+    iframe.id = 'iframe-' + pwa.id;
+    iframe.src = pwa.url;
+    iframe.setAttribute('scrolling', 'auto');
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads');
+    iframe.setAttribute('referrerpolicy', 'no-referrer-when-downgrade');
+
+    var loaded = false;
+    iframe.addEventListener('load', function() {
+        loaded = true;
+        loader.classList.add('hidden');
+    });
+
+    setTimeout(function() {
+        if (!loaded) showError(body, pwa);
+    }, 12000);
+
+    iframe.addEventListener('error', function() {
+        showError(body, pwa);
+    });
+
+    body.appendChild(iframe);
+    card.appendChild(header);
+    card.appendChild(body);
+    container.appendChild(card);
+}
 
         function showError(container, pwa) {
             if (container.querySelector('.pwa-error')) return;
@@ -2619,13 +2902,22 @@ body {
             updateVisibility();
         }
 
-        window.addEventListener('message', function(event) {
-            var msg = event.data;
-            if (msg && msg.type === 'HUB_ROUTER' && msg.target) {
-                var iframe = document.getElementById('iframe-' + msg.target);
-                if (iframe) iframe.contentWindow.postMessage(msg.payload, '*');
-            }
-        });
+window.addEventListener('message', function(event) {
+    var msg = event.data;
+    if (!msg) return;
+
+    /* Labcode (iframe Blabcode) : demande d'export d'un fichier HTML généré dans un sandbox */
+    if (msg.source === 'labcode' && msg.type === 'export-request') {
+        handleLabcodeExport(msg.data);
+        return;
+    }
+
+    /* Hub router — relais vers une autre iframe */
+    if (msg.type === 'HUB_ROUTER' && msg.target) {
+        var iframe = document.getElementById('iframe-' + msg.target);
+        if (iframe) iframe.contentWindow.postMessage(msg.payload, '*');
+    }
+});
 
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Escape') {
